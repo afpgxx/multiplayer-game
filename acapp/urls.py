@@ -15,8 +15,9 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from game.urls.index import index
 
 urlpatterns = [
-    # path('', include('game.urls')),
+    path('', include('game.urls.index')),
     path('admin/', admin.site.urls),
 ]
