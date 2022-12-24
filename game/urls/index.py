@@ -1,5 +1,6 @@
 from django.urls import path, include
 from game.views.index import index
+from game.views.menu.get_img import get_img
 
 urlpatterns = [
     path('', index, name='index'),
