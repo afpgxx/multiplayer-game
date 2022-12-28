@@ -3,13 +3,22 @@ import json
 from django.conf import settings
 from django.core.cache import cache
 
+from thrift import Thrift
+from thrift.transport import TSocket, TTransport
+from thrift.protocol import TBinaryProtocol
+
+from match_system.src.match_server.match_service import Match
+from game.models.player.player import Player
+from channels.db import database_sync_to_async
+
 
 class MultiPlayer(AsyncWebsocketConsumer):
     async def connect(self):
         await self.accept()
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.room_name, self.channel_name)
+        if self.room_name:
+            await self.channel_layer.group_discard(self.room_name, self.channel_name)
 
     async def message(self, data):
         await self.channel_layer.group_send(
@@ -26,48 +35,33 @@ class MultiPlayer(AsyncWebsocketConsumer):
 
     async def create_player(self, data):
         self.room_name = None
-        start = 0
-        for i in range(1000):
-            name = "room-%d" % (i)
-            if not cache.has_key(name) or len(cache.get(name)) < settings.ROOM_CAPACITY:
-                self.room_name = name
+        self.uuid = data['uuid']
 
-        if not self.room_name:
-            return
+        transport = TSocket.TSocket('127.0.0.1', 9090)
+        transport = TTransport.TBufferedTransport(transport)
 
-        if not cache.has_key(self.room_name):
-            cache.set(self.room_name, [], 3600)  # 每一局游戏有效期设置为1小时
+        protocol = TBinaryProtocol.TBinaryProtocol(transport)
 
-        for player in cache.get(self.room_name):
-            await self.send(text_data=json.dumps({
-                'event': 'create_player',
-                'uuid': player['uuid'],
-                'username': player['username'],
-                'photo': player['photo'],
-                }))
+        client = Match.Client(protocol)
 
-        await self.channel_layer.group_add(self.room_name, self.channel_name)
 
-        players = cache.get(self.room_name)
-        players.append({
-            'uuid': data['uuid'],
-            'username': data['username'],
-            'photo': data['photo'],
-            })
+        def db_get_player():
+            return Player.objects.get(user__username=data['username'])
 
-        cache.set(self.room_name, players, 3600)
-        await self.channel_layer.group_send(
-                self.room_name,
-                {
-                    'type': 'group_send_event',
-                    'event': 'create_player',
-                    'uuid': data['uuid'],
-                    'username': data['username'],
-                    'photo': data['photo'],
-                }
-            )
+        player = await database_sync_to_async(db_get_player)()
+
+        transport.open()
+
+        client.add_player(player.score, data['uuid'], data['username'], data['photo'], self.channel_name)
+
+        transport.close()
+
 
     async def group_send_event(self, data):
+        if not self.room_name:
+            keys = cache.keys('*%s*' % (self.uuid))
+            if keys:
+                self.room_name = keys[0]
         await self.send(text_data=json.dumps(data))
 
     async def move_to(self, data):
