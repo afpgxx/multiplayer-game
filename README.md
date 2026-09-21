@@ -1,1 +1,1 @@
-## git.acwing.com/zdl/django
+## An multi-player game
